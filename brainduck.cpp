@@ -1,74 +1,140 @@
 #include <iostream>
+#include <fstream>
 #include <string>
-
-#define MEMSIZE 96
-
-#define ESC "\x1b["
+#include <vector>
+#include <chrono>
+#include <cctype>
+#include <cstdio>
 
 using namespace std;
 
-
-void showmem(char array[]) {
-	for (int i = 0; i < MEMSIZE / 16; i++) {
-		printf("%08x : ", i);
-		for (int j = 0; j < 16; j++)
-			printf("%02x ", (unsigned char) array[16*i+j]);
+void showmem(const vector<unsigned char>& tape) {
+	cout << "\nMemory dump:\n";
+	
+	const int chunk_size = 8;
+	
+	for (size_t i = 0; i < tape.size(); i += chunk_size) {
+		// offset
+		printf("%08lx  ", i);
+		
+		// hex bytes
+		for (size_t j = i; j < i + chunk_size && j < tape.size(); j++) {
+			printf("%02x ", tape[j]);
+		}
+		
+		// padding for shorter last line
+		for (size_t j = tape.size() - i; j < chunk_size; j++) {
+			printf("   ");
+		}
+		
+		printf("  ");
+		
+		// ASCII (safe)
+		for (size_t j = i; j < i + chunk_size && j < tape.size(); j++) {
+			unsigned char b = tape[j];
+			if (isprint(b) || b == ' ') {
+				printf("%c", (char)b);
+			} else {
+				printf(".");
+			}
+		}
+		
 		printf("\n");
 	}
 }
 
-
-int main(int argc, char* argv[]) {
-
-	string input;
-	cin >> input;
-	cout << input << endl;
-
-	char array[MEMSIZE] = {0};
-	char *ptr = array;
-	cout << "---\n";
-	for (int pos = 0; pos < input.size(); pos++) {
-		char c = input[pos];
-
-		//showmem(array);
-		//printf("pos = %d\n", pos);
-		//printf("ptr = %ld (%d)\n", ptr - array, *ptr);
-		//printf(ESC "8A");
-		
-
-		switch (c) {
-			case '>': ++ptr; break;
-			case '<': --ptr; break;
-			case '+': ++*ptr; break;
-			case '-': --*ptr; break;
-			case '.': putchar(*ptr); break;
-			case ',': *ptr = getchar(); break;
-			case '[': if (*ptr) ; else {
-				int balance = 1;
-				while (balance !=0) {
-					pos++;
-					c = input[pos];
-					if (c == '[') balance++;
-					if (c == ']') balance--;
-				}
-				pos++;
-			}; break;
-			case ']': if (*ptr) {
-				int b = 1;
-				while (b != 0) {
-					pos--;
-					c = input[pos];
-					if (c == '[') b--;
-					if (c == ']') b++;
-				}
-			}; break; 
-			default:;
-			//cout << "unrecognized char " << c << endl; exit(1);
+void bf(const string& code) {
+	auto start = chrono::high_resolution_clock::now();
+	
+	// Initialize tape and pointers
+	vector<unsigned char> tape(64, 0);
+	size_t ptr = 0;
+	size_t max_ptr = 0;
+	
+	// Build jump table
+	vector<size_t> jump(code.length(), 0);
+	vector<size_t> stack;
+	for (size_t i = 0; i < code.length(); i++) {
+		if (code[i] == '[') {
+			stack.push_back(i);
+		}
+		if (code[i] == ']') {
+			size_t j = stack.back();
+			stack.pop_back();
+			jump[i] = j;
+			jump[j] = i;
 		}
 	}
+	
+	// Execute
+	size_t ip = 0;
+	while (ip < code.length()) {
+		switch (code[ip]) {
+			case '>':
+				ptr++;
+				max_ptr = max(max_ptr, ptr);
+				// Grow tape if needed
+				if (ptr >= tape.size()) {
+					tape.resize(ptr + 1, 0);
+				}
+				break;
+			case '<':
+				ptr--;
+				break;
+			case '+':
+				tape[ptr]++;
+				break;
+			case '-':
+				tape[ptr]--;
+				break;
+			case '.':
+				putchar(tape[ptr]);
+				break;
+			case ',':
+				tape[ptr] = getchar();
+				break;
+			case '[':
+				if (tape[ptr] == 0) {
+					ip = jump[ip];
+				}
+				break;
+			case ']':
+				if (tape[ptr] != 0) {
+					ip = jump[ip];
+				}
+				break;
+			default:
+				break;
+		}
+		ip++;
+	}
+	
+	auto elapsed = chrono::high_resolution_clock::now() - start;
+	
 	cout << "\n---\n";
+	cout << "execution time = " << chrono::duration_cast<chrono::microseconds>(elapsed).count() << " us\n";
+	cout << "max memory usage = " << hex << (max_ptr + 1) << " bytes\n";
+	
+	showmem(tape);
+}
 
-	showmem(array);
-
+int main(int argc, char* argv[]) {
+	if (argc < 2) {
+		cerr << "Usage: " << argv[0] << " <file_path>" << endl;
+		return 1;
+	}
+	
+	// Read file
+	ifstream file(argv[1]);
+	if (!file) {
+		cerr << "Could not read file" << endl;
+		return 1;
+	}
+	
+	string code((istreambuf_iterator<char>(file)), istreambuf_iterator<char>());
+	file.close();
+	
+	bf(code);
+	
 	return 0;
 }
